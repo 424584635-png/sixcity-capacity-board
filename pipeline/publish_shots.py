@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""把三张维度截图上传到 GitHub 公开仓库，生成 raw 直链写入 shots/urls.json。
+"""把三张维度截图压缩后上传到 GitHub 公开仓库，生成图片直链写入 shots/urls.json。
 
-钉钉 markdown 图片只认基础 URL，会缓存；因此每次用带时间戳的唯一文件名强制刷新，
-并清理上一轮的旧文件，避免仓库无限增长。
+要点：
+1. 钉钉 markdown 图片只认基础 URL 且会缓存 -> 每轮用带时间戳的唯一文件名；
+2. 原图 2100px@2x 太大（~500KB），上传前转 JPEG 并限宽 1800，钉钉拉取更快、不易超时；
+3. 默认用 jsDelivr CDN 直链（国内可达性优于 raw.githubusercontent）。
+
 用法: python publish_shots.py [仓库名，默认 sixcity-capacity-board]
 """
 import base64
+import io
 import json
 import os
 import re
@@ -15,13 +19,18 @@ import time
 import urllib.error
 import urllib.request
 
+from PIL import Image
+
 API = 'https://api.github.com'
 HERE = os.path.dirname(os.path.abspath(__file__))
-BOARD = os.path.dirname(HERE)          # agg_board_1122
+BOARD = os.path.dirname(HERE)            # agg_board_1122
 SHOT_DIR = os.path.join(BOARD, 'shots')  # shot_sections.mjs 输出目录
 URLS = os.path.join(SHOT_DIR, 'urls.json')
 REPO_DEFAULT = 'sixcity-capacity-board'
 FILES = [('city', '1_city.png'), ('team', '2_team.png'), ('squad', '3_squad.png')]
+MAX_W = 1800
+QUALITY = 88
+CDN = 'jsdelivr'  # jsdelivr | raw
 
 
 def api(token, method, path, data=None):
@@ -58,6 +67,24 @@ def read_pat():
     return os.environ.get('GITHUB_PAT')
 
 
+def shrink(src):
+    """PNG -> JPEG bytes，限宽 MAX_W，白底（截图本身不透明，保险起见）"""
+    im = Image.open(src)
+    if im.mode in ('RGBA', 'LA', 'P'):
+        bg = Image.new('RGB', im.size, (255, 255, 255))
+        im = im.convert('RGBA')
+        bg.paste(im, mask=im.split()[-1])
+        im = bg
+    else:
+        im = im.convert('RGB')
+    if im.width > MAX_W:
+        h = round(im.height * MAX_W / im.width)
+        im = im.resize((MAX_W, h), Image.LANCZOS)
+    buf = io.BytesIO()
+    im.save(buf, 'JPEG', quality=QUALITY, optimize=True, progressive=True)
+    return buf.getvalue(), im.size
+
+
 def main():
     token = read_pat()
     if not token:
@@ -70,7 +97,6 @@ def main():
         print('获取 GitHub 账号失败:', st, me)
         sys.exit(1)
     owner = me['login']
-    print('GitHub 账号:', owner)
 
     st, r = api(token, 'GET', f'/repos/{owner}/{repo}')
     if st == 404:
@@ -86,7 +112,6 @@ def main():
         branch = 'main'
     elif st == 200:
         branch = r.get('default_branch', 'main')
-        print('仓库已存在:', f'{owner}/{repo}  分支={branch}')
     else:
         print('查询仓库失败:', st, r)
         sys.exit(1)
@@ -98,26 +123,30 @@ def main():
         if not os.path.exists(fp):
             print('  缺图跳过:', fn)
             continue
-        name = f'{os.path.splitext(fn)[0]}_{stamp}.png'
+        data, size = shrink(fp)
+        name = f'{key}_{stamp}.jpg'
         path = f'/repos/{owner}/{repo}/contents/shots/{name}'
-        with open(fp, 'rb') as f:
-            content = base64.b64encode(f.read()).decode('ascii')
-        st, res = api(token, 'PUT', path,
-                      {'message': f'add {name}', 'content': content, 'branch': branch})
+        st, res = api(token, 'PUT', path, {
+            'message': f'add {name}',
+            'content': base64.b64encode(data).decode('ascii'),
+            'branch': branch})
         if st not in (200, 201):
             print('  上传失败', name, st, res)
             continue
-        raw = f'https://raw.githubusercontent.com/{owner}/{repo}/{branch}/shots/{name}'
-        urls[key] = raw
+        if CDN == 'jsdelivr':
+            url = f'https://cdn.jsdelivr.net/gh/{owner}/{repo}@{branch}/shots/{name}'
+        else:
+            url = f'https://raw.githubusercontent.com/{owner}/{repo}/{branch}/shots/{name}'
+        urls[key] = url
         uploaded.append(name)
-        print('  已上传', name, '->', raw)
+        print(f'  已上传 {name} {size[0]}x{size[1]} {len(data)//1024}KB')
 
-    # 清理上一轮旧图（保留本轮）
+    # 清理上一轮旧图（.jpg/.png 都清，保留本轮）
     st, listing = api(token, 'GET', f'/repos/{owner}/{repo}/contents/shots')
     if st == 200:
         for item in listing:
             nm = item['name']
-            if re.match(r'(1_city|2_team|3_squad)_\d{14}\.png$', nm) and nm not in uploaded:
+            if re.match(r'(city|team|squad|1_city|2_team|3_squad)_\d{14}\.(jpg|png)$', nm) and nm not in uploaded:
                 d_st, _ = api(token, 'DELETE', f'/repos/{owner}/{repo}/contents/shots/{nm}',
                               {'message': f'cleanup {nm}', 'sha': item['sha'], 'branch': branch})
                 if d_st in (200, 201):
@@ -125,7 +154,7 @@ def main():
 
     json.dump({'stamp': stamp, 'urls': urls},
               open(URLS, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
-    print('urls.json 已写入:', URLS, '| 共', len(urls), '张')
+    print('urls.json 已写入 | 共', len(urls), '张')
     if len(urls) != 3:
         sys.exit(3)
 
