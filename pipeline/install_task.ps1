@@ -12,11 +12,12 @@ if (-not (Test-Path $vbs)) { throw "Launcher not found: $vbs" }
 
 $action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"' + $vbs + '"')
 
-# Daily anchor at 08:00, repeat every 30 min for 15h30m -> 08:00, 08:30 ... 23:30 (32 rounds)
+# Daily anchor at 08:00, repeat every 30 min for 16h -> 08:00, 08:30 ... 23:30 (32 rounds)
+# (duration must extend past 23:30, otherwise the last round sits exactly on the boundary and is dropped)
 $t1 = New-ScheduledTaskTrigger -Daily -At '08:00'
 $rep = (New-ScheduledTaskTrigger -Once -At '08:00' `
         -RepetitionInterval (New-TimeSpan -Minutes 30) `
-        -RepetitionDuration (New-TimeSpan -Hours 15 -Minutes 30)).Repetition
+        -RepetitionDuration (New-TimeSpan -Hours 16)).Repetition
 $t1.Repetition = $rep
 
 # Tail round at 23:50 to match the requested 08:00-23:50 window
