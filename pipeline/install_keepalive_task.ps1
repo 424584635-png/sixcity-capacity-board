@@ -6,12 +6,15 @@ $ErrorActionPreference = 'Stop'
 
 $node = 'C:\Users\luansha\.workbuddy\binaries\node\versions\22.22.2-6\node.exe'
 $script = 'C:\Users\luansha\WorkBuddy\2026-11-07-23-44-13\agg_board_1122\keepalive_fs.mjs'
+$vbs = 'C:\Users\luansha\WorkBuddy\2026-11-07-23-44-13\agg_board_1122\keepalive_hidden.vbs'
 $logdir = 'C:\Users\luansha\WorkBuddy\2026-11-07-23-44-13\agg_board_1122\pipeline'
 $name = 'CapacityBoard-FsKeepalive'
 
 if (-not (Test-Path $script)) { throw "Script not found: $script" }
+if (-not (Test-Path $vbs)) { throw "VBS launcher not found: $vbs" }
 
-$action = New-ScheduledTaskAction -Execute $node -Argument ('"' + $script + '"') -WorkingDirectory $logdir
+# 用 wscript 隐藏窗口启动，避免弹出黑色控制台
+$action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"' + $vbs + '"') -WorkingDirectory $logdir
 $t1 = New-ScheduledTaskTrigger -Once -At '00:00'
 $rep = (New-ScheduledTaskTrigger -Once -At '00:00' `
         -RepetitionInterval (New-TimeSpan -Minutes 15) `
