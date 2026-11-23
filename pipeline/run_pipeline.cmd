@@ -19,11 +19,10 @@ for %%F in ("%LOG%") do if %%~zF GTR 2097152 move /Y "%LOG%" "%LOG%.old">nul 2>&
 
 call :log "===== PIPELINE START ====="
 
-call :log "[1/13] Check Edge CDP 9223"
-curl -s -m 5 http://127.0.0.1:9223/json/version>nul 2>&1
-if errorlevel 1 goto e_cdp
+call :log "[1/13] Sync cookies from browser (read-only, no login)"
+"%NODE%" "%PIPE%\sync_cookies.mjs">>"%LOG%" 2>&1
 
-call :log "[2/13] Auth health check + auto heal (fs/xy)"
+call :log "[2/13] Auth check over plain HTTP (no browser, no auto-login)"
 "%NODE%" "%AGG%\check_auth.mjs">>"%LOG%" 2>&1
 if errorlevel 3 goto fs_degraded
 if errorlevel 2 goto e_xy
@@ -31,7 +30,7 @@ del /Q "%PIPE%\.fs_degraded" >nul 2>&1
 goto after_auth
 
 :fs_degraded
-call :log "WARN: fs session unavailable (needs manual login), this round degrades to last valid fs data"
+call :log "WARN: fs token expired (needs manual login), this round degrades to last valid fs data"
 if exist "%PIPE%\.fs_degraded" goto after_auth
 echo degraded>"%PIPE%\.fs_degraded"
 "%PY%" "%PIPE%\push_alert.py" fs_degraded>>"%LOG%" 2>&1
