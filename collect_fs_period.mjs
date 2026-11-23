@@ -14,8 +14,27 @@ const ds = d => d.toISOString().slice(0, 10);
 const endDate = ds(now);
 const startDate = ds(new Date(now.getTime() - 6 * 86400e3));
 
-const ok = await ensureFs(ctx, R);
-if (!ok) { console.error('风神会话不可用，无法采集时段明细'); await b.close(); process.exit(2); }
+const ok = await ensureFs(ctx, R, { attempts: 1 });
+if (!ok) {
+  // 风神会话不可用（统一登录中心要验证码）-> 降级：沿用上一轮有效的时段/小组数据，整轮不失败
+  let prev = null;
+  try { prev = JSON.parse(fs.readFileSync(ROOT + '/data.json.prev.json', 'utf-8')); } catch (e) {}
+  if (prev && prev.fengshenPeriod && prev.fengshenPeriod.ok) {
+    out.fengshenPeriod = { ...prev.fengshenPeriod, stale: true,
+      staleNote: '风神会话不可用，沿用上一轮有效时段数据' };
+    out.fsSquads = prev.fsSquads || [];
+    out.fsPeriodRiders = prev.fsPeriodRiders || [];
+    out.meta.fsStale = true;
+    out.meta.fsStaleAt = prev.meta?.collectedAt || '';
+    fs.writeFileSync(ROOT + '/data.json', JSON.stringify(out), 'utf-8');
+    console.warn('风神会话不可用，时段明细降级为上一轮数据（timeCode=' + out.fengshenPeriod.timeCode + '）');
+    await b.close();
+    process.exit(0);
+  }
+  console.error('风神会话不可用且无历史时段数据');
+  await b.close();
+  process.exit(2);
+}
 
 // ---- 时段定位：四路兜底 ----
 const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
