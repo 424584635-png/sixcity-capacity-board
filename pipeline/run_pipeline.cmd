@@ -19,52 +19,56 @@ for %%F in ("%LOG%") do if %%~zF GTR 2097152 move /Y "%LOG%" "%LOG%.old">nul 2>&
 
 call :log "===== PIPELINE START ====="
 
-call :log "[1/12] Check Edge CDP 9223"
+call :log "[1/13] Check Edge CDP 9223"
 curl -s -m 5 http://127.0.0.1:9223/json/version>nul 2>&1
 if errorlevel 1 goto e_cdp
 
-call :log "[2/12] Auth health check + auto heal (fs/xy)"
+call :log "[2/13] Auth health check + auto heal (fs/xy)"
 "%NODE%" "%AGG%\check_auth.mjs">>"%LOG%" 2>&1
 if errorlevel 2 goto e_xy
 if errorlevel 1 goto e_fs
 
-call :log "[3/12] Crawl cddp site table (26 areas)"
+call :log "[3/13] Crawl cddp site table (26 areas)"
 "%NODE%" "%CDDP%\crawl_all.mjs">>"%LOG%" 2>&1
 if errorlevel 1 goto e_crawl_all
 
-call :log "[4/12] Crawl cddp bd lines"
+call :log "[4/13] Crawl cddp bd lines"
 "%NODE%" "%CDDP%\crawl_bd_tms.mjs">>"%LOG%" 2>&1
 if errorlevel 1 goto e_crawl_bd
 
-call :log "[5/12] Crawl fengshen + xuanyuan attendance"
+call :log "[5/13] Crawl fengshen + xuanyuan attendance"
 "%NODE%" "%AGG%\collect.mjs">>"%LOG%" 2>&1
 if errorlevel 1 goto e_collect
 
-call :log "[6/12] Crawl current period detail"
+call :log "[6/13] Crawl current period detail"
 "%NODE%" "%AGG%\collect_fs_period.mjs">>"%LOG%" 2>&1
 if errorlevel 1 goto e_period
 
-call :log "[7/12] Validate snapshot (auto revert to last valid)"
+call :log "[7/13] Validate snapshot (auto revert to last valid)"
 "%PY%" "%PIPE%\guard_snapshot.py" check>>"%LOG%" 2>&1
 if errorlevel 1 goto e_guard
 
-call :log "[8/12] Build board html"
+call :log "[8/13] Build board html"
 "%PY%" "%AGG%\build_board.py">>"%LOG%" 2>&1
 if errorlevel 1 goto e_build
 
-call :log "[9/12] Screenshot 3 sections"
+call :log "[9/13] Build excel deliver"
+"%PY%" "%AGG%\build_excel.py">>"%LOG%" 2>&1
+if errorlevel 1 call :log "WARN: excel build failed (does not affect push)"
+
+call :log "[10/13] Screenshot 3 sections"
 "%NODE%" "%AGG%\shot_sections.mjs">>"%LOG%" 2>&1
 if errorlevel 1 goto e_shot
 
-call :log "[10/12] Upload screenshots to GitHub"
+call :log "[11/13] Upload screenshots to GitHub"
 "%PY%" "%PIPE%\publish_shots.py">>"%LOG%" 2>&1
 if errorlevel 1 goto e_upload
 
-call :log "[11/12] Push DingTalk (main robot, fallback to backup)"
+call :log "[12/13] Push DingTalk (main robot, fallback to backup)"
 "%PY%" "%PIPE%\push_dingtalk.py">>"%LOG%" 2>&1
 if errorlevel 1 goto e_push
 
-call :log "[12/12] Mirror screenshots to local public dir"
+call :log "[13/13] Mirror screenshots to local public dir"
 copy /Y "%AGG%\shots\1_city.png" "%AGG%\shots\public\1_city.png">nul 2>&1
 copy /Y "%AGG%\shots\2_team.png" "%AGG%\shots\public\2_team.png">nul 2>&1
 copy /Y "%AGG%\shots\3_squad.png" "%AGG%\shots\public\3_squad.png">nul 2>&1
