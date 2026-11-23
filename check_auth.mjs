@@ -1,23 +1,10 @@
-// 登录态体检 + 自愈：
-//   xy（轩辕）失效 -> exit 2（必须人工登录，无法自动恢复）
-//   fs（风神）失效 -> 自动重建会话（工作台刷新 / 统一登录 SSO 两种策略），成功 exit 0，失败 exit 1
-import { connect, ensureFs, post } from './fs_guard.mjs';
+// 登录态体检（纯 HTTP，不经过浏览器、不执行任何登录动作）
+// 目的：日常取数完全脱离浏览器，就不会因为自动登录把同账号的其他人顶下线。
+// 令牌失效时也不自动登录，只降级并提示人工处理。
+// 退出码：0 = 全通；2 = 轩辕令牌失效（致命，看板缺少小队维度）；3 = 风神令牌失效（可降级）
+import { probeFs, probeXy } from './pipeline/http_client.mjs';
 
-const { b, ctx } = await connect();
-const R = ctx.request;
-
-const xy = await post(R, 'xtop.xy.special.realTimeAttendance.listCustomTime',
-  { objectType: 2, bdGroupIds: [100000447021] }, 30000);
-const xyCode = xy.code;
-console.log('auth xy', xyCode);
-if (xyCode !== '200') {
-  console.error('xy session invalid');
-  await b.close();
-  process.exit(2);
-}
-
-const fsOk = await ensureFs(ctx, R, { attempts: 1 });
-console.log('auth fs', fsOk ? '200' : 'FAILED');
-await b.close();
-// 0=全通；2=轩辕失效(必须人工)；3=风神失效(可降级，用上一轮数据继续)
-process.exit(fsOk ? 0 : 3);
+const fsOk = await probeFs();
+const xyOk = await probeXy();
+console.log('auth fs', fsOk ? '200' : 'FAIL', '| xy', xyOk ? '200' : 'FAIL');
+process.exit(xyOk ? (fsOk ? 0 : 3) : 2);
