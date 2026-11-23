@@ -37,11 +37,16 @@ async function reloginViaWorkbench(ctx) {
   try {
     await page.goto(AEOLUS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(5000);
+    const block = await detectLoginBlock(page);
+    if (block.captcha || (block.password && block.sms)) {
+      console.log('  登录页需要图形/短信验证码，自动登录不可行');
+      return block.captcha ? 'captcha' : 'password';
+    }
     if (await clickLogin(page)) await page.waitForTimeout(18000);
     return true;
   } catch (e) {
     console.log('  relogin(workbench) err', e.message);
-    return false;
+    return true;
   } finally {
     await page.close().catch(() => {});
   }
@@ -55,6 +60,11 @@ async function reloginViaSso(ctx) {
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(4000);
+    const block = await detectLoginBlock(page);
+    if (block.captcha || (block.password && block.sms)) {
+      console.log('  SSO 页需要图形/短信验证码，自动登录不可行');
+      return block.captcha ? 'captcha' : 'password';
+    }
     if (await clickLogin(page)) {
       await page.waitForTimeout(18000);
       // 等回跳到 aeolus（最多再等 15s）
@@ -67,7 +77,7 @@ async function reloginViaSso(ctx) {
     return true;
   } catch (e) {
     console.log('  relogin(sso) err', e.message);
-    return false;
+    return true;
   } finally {
     await page.close().catch(() => {});
   }
@@ -86,18 +96,59 @@ async function clickLogin(page) {
 }
 
 /**
- * 确保风神接口可用。会话有效直接返回；否则最多尝试 strategies.length*attempts 次重建。
- * 返回 true 表示可用。
+ * 判断登录页是否需要人工介入：
+ *  - needsCaptcha: 出现图形/短信验证码输入框 -> 脚本无法自动登录
+ *  - needsPassword: 需要账号密码（SSO 会话已失效）
  */
-export async function ensureFs(ctx, R, { attempts = 2, strategies = [reloginViaWorkbench, reloginViaSso] } = {}) {
+export async function detectLoginBlock(page) {
+  try {
+    return await page.evaluate(() => {
+      const txt = (document.body.innerText || '');
+      const inputs = [...document.querySelectorAll('input')].map(i => ({
+        name: i.name || '', id: i.id || '', ph: i.placeholder || '', type: i.type || '',
+      }));
+      const captcha = inputs.some(i => /captcha|verify|code/i.test(i.name + i.id + i.ph))
+        || /图形验证码|图片验证码|滑动验证|滑块/.test(txt);
+      const pwd = inputs.some(i => i.type === 'password') || /密码登录/.test(txt);
+      const sms = /短信登录|验证码登录/.test(txt);
+      return { captcha, password: pwd, sms, snippet: txt.replace(/\s+/g, ' ').slice(0, 120) };
+    });
+  } catch (e) {
+    return { captcha: false, password: false, sms: false, snippet: '' };
+  }
+}
+
+/** 关闭我们打开的登录页，避免越积越多 */
+async function closeLoginPages(ctx, keepPage) {
+  for (const p of ctx.pages()) {
+    if (p === keepPage) continue;
+    const u = p.url() || '';
+    if (u.includes('mozi-login') || u.includes('login.alibaba-inc')) {
+      await p.close().catch(() => {});
+    }
+  }
+}
+
+/**
+ * 确保风神接口可用。会话有效直接返回；否则尝试重建。
+ * 若登录页出现验证码/密码（SSO 已失效），脚本无法自动恢复，立即停止重试并返回 false，
+ * 避免频繁登录触发风控。
+ */
+export async function ensureFs(ctx, R, { attempts = 1, strategies = [reloginViaWorkbench, reloginViaSso] } = {}) {
   if (await probeFs(R)) return true;
   for (let round = 1; round <= attempts; round++) {
     for (const fn of strategies) {
       console.log(`  fs session invalid, relogin#${round} via ${fn.name}`);
-      await fn(ctx);
+      const blocked = await fn(ctx);
+      if (blocked === 'captcha' || blocked === 'password') {
+        console.log('  fs: 统一登录中心需要人工登录（验证码/密码），已停止自动重试');
+        await closeLoginPages(ctx, null);
+        return false;
+      }
       await sleep(3000);
       if (await probeFs(R)) {
         console.log('  fs session restored');
+        await closeLoginPages(ctx, null);
         return true;
       }
     }
