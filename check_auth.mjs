@@ -16,7 +16,8 @@ if (xyCode !== '200') {
   process.exit(2);
 }
 
-const fsOk = await ensureFs(ctx, R, { attempts: 2 });
+const fsOk = await ensureFs(ctx, R, { attempts: 1 });
 console.log('auth fs', fsOk ? '200' : 'FAILED');
 await b.close();
-process.exit(fsOk ? 0 : 1);
+// 0=全通；2=轩辕失效(必须人工)；3=风神失效(可降级，用上一轮数据继续)
+process.exit(fsOk ? 0 : 3);
