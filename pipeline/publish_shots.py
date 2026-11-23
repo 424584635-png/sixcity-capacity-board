@@ -30,7 +30,9 @@ REPO_DEFAULT = 'sixcity-capacity-board'
 FILES = [('city', '1_city.png'), ('team', '2_team.png'), ('squad', '3_squad.png')]
 MAX_W = 1800
 QUALITY = 88
-CDN = 'jsdelivr'  # jsdelivr | raw
+# 实测：钉钉服务端拉 cdn.jsdelivr.net 的图会返回 -1「系统繁忙」，
+# 换 raw.githubusercontent.com 一次成功。因此默认用 raw。
+CDN = 'raw'  # raw | jsdelivr
 
 
 def api(token, method, path, data=None):
@@ -141,16 +143,23 @@ def main():
         uploaded.append(name)
         print(f'  已上传 {name} {size[0]}x{size[1]} {len(data)//1024}KB')
 
-    # 清理上一轮旧图（.jpg/.png 都清，保留本轮）
+    # 清理旧图：保留最近 2 轮（钉钉可能延迟加载上一条消息里的图，删太早会 404）
     st, listing = api(token, 'GET', f'/repos/{owner}/{repo}/contents/shots')
     if st == 200:
-        for item in listing:
-            nm = item['name']
-            if re.match(r'(city|team|squad|1_city|2_team|3_squad)_\d{14}\.(jpg|png)$', nm) and nm not in uploaded:
-                d_st, _ = api(token, 'DELETE', f'/repos/{owner}/{repo}/contents/shots/{nm}',
-                              {'message': f'cleanup {nm}', 'sha': item['sha'], 'branch': branch})
-                if d_st in (200, 201):
-                    print('  清理旧图', nm)
+        olds = [it['name'] for it in listing
+                if re.match(r'(city|team|squad|1_city|2_team|3_squad)_\d{14}\.(jpg|png)$', it['name'])
+                and it['name'] not in uploaded]
+        stamps = sorted({re.search(r'_(\d{14})\.', n).group(1) for n in olds})
+        keep = set(stamps[-1:])          # 上一轮保留
+        for nm in olds:
+            stm = re.search(r'_(\d{14})\.', nm).group(1)
+            if stm in keep:
+                continue
+            item = next(i for i in listing if i['name'] == nm)
+            d_st, _ = api(token, 'DELETE', f'/repos/{owner}/{repo}/contents/shots/{nm}',
+                          {'message': f'cleanup {nm}', 'sha': item['sha'], 'branch': branch})
+            if d_st in (200, 201):
+                print('  清理旧图', nm)
 
     json.dump({'stamp': stamp, 'urls': urls},
               open(URLS, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
