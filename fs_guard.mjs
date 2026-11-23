@@ -1,4 +1,6 @@
-// 风神(aeolus/fs) 会话守卫：探测 -> 未登录则重新建立会话 -> 供采集脚本复用
+// 风神(aeolus/fs) 会话守卫 —— 仅供诊断/排障使用
+// 注意：主流水线已改为「纯 HTTP 取数」（pipeline/http_client.mjs），**不再执行任何自动登录**，
+// 因此不会再把使用同一账号的其他人顶下线。本文件保留用于手动排查登录页问题。
 import { createRequire } from 'module';
 const require = createRequire('C:/Users/luansha/Documents/deepseek-harness/default-workspace/package.json');
 const { chromium } = require('playwright-core');
