@@ -5,7 +5,8 @@
 要点：
 1. 钉钉 markdown 图片只认基础 URL 且会缓存 -> 每轮用带时间戳的唯一文件名；
 2. 原图 2100px@2x 太大（~500KB），上传前转 JPEG 并限宽 1800，钉钉拉取更快、不易超时；
-3. 默认用 jsDelivr CDN 直链（国内可达性优于 raw.githubusercontent）。
+3. 实测钉钉服务端拉不动 cdn.jsdelivr.net（报 -1 系统繁忙），raw.githubusercontent 一次成功，
+   所以默认用 raw。
 
 用法: python publish_shots.py [仓库名，默认 sixcity-capacity-board]
 """
