@@ -1,7 +1,7 @@
 // 风神当前时段骑手明细（用于时段排班/时段排班且在线统计）
 // 修复：① 会话守卫（掉线自动重建）② 接口失败重试 ③ 时段定位四路兜底，绝不再因定位失败中断整轮
 import fs from 'fs';
-import { connect, ensureFs, fsCall, post } from './fs_guard.mjs';
+import { connect, ensureFs, fsCall, fsGet, post } from './fs_guard.mjs';
 
 const ROOT = 'C:/Users/luansha/WorkBuddy/2026-11-07-23-44-13/agg_board_1122';
 const out = JSON.parse(fs.readFileSync(ROOT + '/data.json', 'utf-8'));
@@ -67,6 +67,18 @@ out.fengshenPeriod = {
   periodSchedOnlineRate: periodScheduled ? Math.round(periodSchedOnline / periodScheduled * 10000) / 100 : null,
   note: '时段排班=listAttendance 中 timeGrouped=true；时段排班且在线=其中时段在线时长>0 或 onlineStatus=true',
 };
+// 当前时段骑手明细（小组维度要用 workStatus / 时段在线，必须取当轮，不能用昨天的静态快照）
+out.fsPeriodRiders = riders;
+
+// 骑手小组（小组维度用）：squadId/squadName/managerName/knightIds
+const sq = await fsGet(ctx, R, '/lpd.meepo.mgmt/team/squad/read/getTeamSquadList?teamId=17424603', { tries: 3 });
+const squads = (sq.data || []).map(s => ({
+  squadId: s.squadId, squadName: s.squadName, managerName: s.managerName || '',
+  knightIds: (s.teamSquadKnights || []).map(k => k.knightId),
+}));
+out.fsSquads = squads;
+out.fsSquadsAt = new Date().toISOString();
+console.log('squads', squads.length, '| members', squads.reduce((a, s) => a + s.knightIds.length, 0));
 fs.writeFileSync(ROOT + '/data.json', JSON.stringify(out), 'utf-8');
 fs.mkdirSync(ROOT + '/raw', { recursive: true });
 fs.writeFileSync(ROOT + '/raw/fs_period_attendance.json', att.text, 'utf-8');
