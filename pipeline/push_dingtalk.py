@@ -77,6 +77,12 @@ def main():
     u = json.load(open(URLS, encoding='utf-8'))['urls']
     period = f"{m.get('periodName', '')}({m.get('periodCode', '')}) {m.get('periodRange', '')}".strip()
     stale = '（本轮为上一轮有效快照回退）' if m.get('revertedAt') else ''
+    fs_stale = m.get('fsStale')
+    fs_note = ''
+    if fs_stale:
+        fs_note = (f'\n\n> ⚠️ **风神登录态失效**，风神相关指标（思茅站 7 项、小组维度）沿用 '
+                   f'{cst(m.get("fsStaleAt"))} 的数据；轩辕/盯盘指标为实时。'
+                   f'需在本机 Edge 完成一次风神登录（统一登录中心输图形验证码）后自动恢复。')
 
     text = (f'### 运力在线情况\n\n'
             f'**当前时段：**{period}\n\n'
@@ -84,7 +90,8 @@ def main():
             f'---\n\n'
             f'**① 城市维度**\n\n![]({u["city"]})\n\n'
             f'**② 小队维度**\n\n![]({u["team"]})\n\n'
-            f'**③ 小组维度**\n\n![]({u["squad"]})')
+            f'**③ 小组维度**\n\n![]({u["squad"]})'
+            f'{fs_note}')
     payload = {'msgtype': 'markdown',
                'markdown': {'title': '运力在线情况', 'text': text}}
     ok, msg = deliver(payload, '推送')
