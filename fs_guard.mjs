@@ -120,3 +120,28 @@ export async function fsCall(ctx, R, api, request, { tries = 3 } = {}) {
   }
   return last;
 }
+
+/** 带重试的 fs GET（骑手小组列表等 lpd.meepo 接口） */
+export async function fsGet(ctx, R, path, { tries = 3 } = {}) {
+  let last = null;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const r = await R.get('https://httpizza.ele.me' + path, {
+        headers: { Origin: 'https://aeolus.ele.me', Referer: 'https://aeolus.ele.me/' },
+        timeout: 60000,
+      });
+      const t = await r.text();
+      let j = null;
+      try { j = JSON.parse(t); } catch (e) {}
+      const code = String(j?.code ?? '');
+      last = { code, data: j?.data, text: t };
+      if (code === '200' && j?.data) return last;
+      if (code === '401') await ensureFs(ctx, R, { attempts: 1 });
+      else await sleep(1500);
+    } catch (e) {
+      last = { code: 'ERR', data: null, text: String(e.message || e) };
+      await sleep(1500);
+    }
+  }
+  return last;
+}
