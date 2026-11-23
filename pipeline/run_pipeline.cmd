@@ -25,9 +25,18 @@ if errorlevel 1 goto e_cdp
 
 call :log "[2/13] Auth health check + auto heal (fs/xy)"
 "%NODE%" "%AGG%\check_auth.mjs">>"%LOG%" 2>&1
+if errorlevel 3 goto fs_degraded
 if errorlevel 2 goto e_xy
-if errorlevel 1 goto e_fs
+del /Q "%PIPE%\.fs_degraded" >nul 2>&1
+goto after_auth
 
+:fs_degraded
+call :log "WARN: fs session unavailable (needs manual login), this round degrades to last valid fs data"
+if exist "%PIPE%\.fs_degraded" goto after_auth
+echo degraded>"%PIPE%\.fs_degraded"
+"%PY%" "%PIPE%\push_alert.py" fs_degraded>>"%LOG%" 2>&1
+
+:after_auth
 call :log "[3/13] Crawl cddp site table (26 areas)"
 "%NODE%" "%CDDP%\crawl_all.mjs">>"%LOG%" 2>&1
 if errorlevel 1 goto e_crawl_all
