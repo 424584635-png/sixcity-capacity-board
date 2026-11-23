@@ -6,6 +6,7 @@ import path from 'path';
 const require = createRequire('C:/Users/luansha/Documents/deepseek-harness/default-workspace/package.json');
 const { chromium } = require('playwright-core');
 import { ensureFs, fsCall } from './fs_guard.mjs';
+
 const ROOT = 'C:/Users/luansha/WorkBuddy/2026-11-07-23-44-13/agg_board_1122';
 const RAW = path.join(ROOT, 'raw'); fs.mkdirSync(RAW, { recursive: true });
 const b = await chromium.connectOverCDP('http://127.0.0.1:9223');
@@ -54,21 +55,49 @@ const SITES = [
   { area: '墨江', site: '逸海-墨江站', teamId: 17427209 },
   { area: '镇沅', site: '逸海-镇沅站', teamId: 17438735 },
 ];
+// 风神会话不可用时（统一登录中心要求验证码），用上一轮有效风神数据降级继续，
+// 而不是让整轮失败——轩辕/盯盘数据照常刷新，推送也不会断。
+let fsDegraded = false;
+let prevFs = null;
+try {
+  const prevRaw = fs.readFileSync(path.join(ROOT, 'data.json.prev.json'), 'utf-8');
+  prevFs = JSON.parse(prevRaw);
+} catch (e) { /* 没有历史快照 */ }
+
 out.fengshen = {};
-for (const s of SITES) {
-  const x = await fsPost(FS + 'queryAttendanceStatistics', { teamId: s.teamId }, 'fs_' + s.teamId);
-  out.fengshen[s.area] = { ...s, ok: x.ok, data: x.data || null, err: x.err || null };
+// 先探一次会话：不可用就整体降级，不要对 5 个站点各重登一次（会白等好几分钟且容易触发风控）
+const fsReady = await ensureFs(ctx, R, { attempts: 1 });
+if (fsReady) {
+  for (const s of SITES) {
+    const x = await fsPost(FS + 'queryAttendanceStatistics', { teamId: s.teamId }, 'fs_' + s.teamId);
+    out.fengshen[s.area] = { ...s, ok: x.ok, data: x.data || null, err: x.err || null };
+  }
+} else {
+  console.warn('风神会话不可用，跳过风神站点采集（降级模式）');
+  for (const s of SITES) {
+    out.fengshen[s.area] = { ...s, ok: false, data: null, err: 'session unavailable' };
+  }
 }
 // 思茅站是看板主指标来源，缺失则整轮失败（由流水线回退到上一轮有效快照）
 if (!out.fengshen['思茅区'].ok || !out.fengshen['思茅区'].data) {
-  console.error('风神思茅站数据缺失，放弃本轮采集');
-  fs.writeFileSync(path.join(ROOT, 'manifest.json'), JSON.stringify({ ...out.meta, calls, failed: true }, null, 2));
-  await b.close();
-  process.exit(3);
+  const canReuse = prevFs && prevFs.fengshen && prevFs.fengshen['思茅区'] && prevFs.fengshen['思茅区'].data;
+  if (!canReuse) {
+    console.error('风神思茅站数据缺失，且无历史快照可用，放弃本轮采集');
+    fs.writeFileSync(path.join(ROOT, 'manifest.json'), JSON.stringify({ ...out.meta, calls, failed: true }, null, 2));
+    await b.close();
+    process.exit(3);
+  }
+  fsDegraded = true;
+  console.warn('风神会话不可用，降级使用上一轮有效风神数据（' + (prevFs.meta?.collectedAt || '未知时间') + '）');
+  out.fengshen = prevFs.fengshen;
+  out.fengshenTeams = prevFs.fengshenTeams || [];
+  out.meta.fsStale = true;
+  out.meta.fsStaleAt = prevFs.meta?.collectedAt || '';
+} else {
+  // 风神站点可用清单（权限）
+  const teams = await fsPost('xtop.lpd.intelligentConfig.getTeamsAll', {}, 'fs_teams');
+  out.fengshenTeams = teams.data || [];
 }
-// 风神站点可用清单（权限）
-const teams = await fsPost('xtop.lpd.intelligentConfig.getTeamsAll', {}, 'fs_teams');
-out.fengshenTeams = teams.data || [];
 
 // ===== 2. 轩辕考勤：思茅商圈片 × 运力线 × 小队 =====
 const XY = 'xtop.xy.special.realTimeAttendance.';
