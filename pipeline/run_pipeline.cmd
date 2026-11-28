@@ -24,67 +24,76 @@ for %%F in ("%LOG%") do if %%~zF GTR 2097152 move /Y "%LOG%" "%LOG%.old">nul 2>&
 
 call :log "===== PIPELINE START ====="
 
-call :log "[1/14] Sync cookies from browser (read-only, no login)"
+call :log "[1/15] Sync cookies from browser (read-only, no login)"
 "%NODE%" "%PIPE%\sync_cookies.mjs">>"%LOG%" 2>&1
 
-call :log "[2/14] Auth check over plain HTTP (no browser, no auto-login)"
+call :log "[2/15] Auth check over plain HTTP"
 "%NODE%" "%AGG%\check_auth.mjs">>"%LOG%" 2>&1
-if errorlevel 3 goto fs_degraded
+if errorlevel 3 goto fs_autologin
 if errorlevel 2 goto e_xy
 del /Q "%PIPE%\.fs_degraded" >nul 2>&1
 goto after_auth
 
+:fs_autologin
+call :log "WARN: fs token expired, trying auto-login (prefilled account/no captcha)"
+"%NODE%" "%PIPE%\auto_login_fs.mjs">>"%LOG%" 2>&1
+"%NODE%" "%AGG%\check_auth.mjs">>"%LOG%" 2>&1
+if errorlevel 3 goto fs_degraded
+del /Q "%PIPE%\.fs_degraded" >nul 2>&1
+call :log "INFO: fs auto-login OK, token restored"
+goto after_auth
+
 :fs_degraded
-call :log "WARN: fs token expired (needs manual login), this round degrades to last valid fs data"
+call :log "WARN: fs auto-login failed (captcha/not prefilled), this round degrades to last valid fs data"
 if exist "%PIPE%\.fs_degraded" goto after_auth
 echo degraded>"%PIPE%\.fs_degraded"
 "%PY%" "%PIPE%\push_alert.py" fs_degraded>>"%LOG%" 2>&1
 
 :after_auth
-call :log "[3/14] Ensure python deps (self-heal after WorkBuddy python upgrade)"
+call :log "[4/15] Ensure python deps (self-heal after WorkBuddy python upgrade)"
 "%PY%" "%PIPE%\ensure_deps.py">>"%LOG%" 2>&1
 
-call :log "[4/14] Crawl cddp site table (26 areas)"
+call :log "[5/15] Crawl cddp site table (26 areas)"
 "%NODE%" "%CDDP%\crawl_all.mjs">>"%LOG%" 2>&1
 if errorlevel 1 goto e_crawl_all
 
-call :log "[5/14] Crawl cddp bd lines"
+call :log "[6/15] Crawl cddp bd lines"
 "%NODE%" "%CDDP%\crawl_bd_tms.mjs">>"%LOG%" 2>&1
 if errorlevel 1 goto e_crawl_bd
 
-call :log "[6/14] Crawl fengshen + xuanyuan attendance"
+call :log "[7/15] Crawl fengshen + xuanyuan attendance"
 "%NODE%" "%AGG%\collect.mjs">>"%LOG%" 2>&1
 if errorlevel 1 goto e_collect
 
-call :log "[7/14] Crawl current period detail"
+call :log "[8/15] Crawl current period detail"
 "%NODE%" "%AGG%\collect_fs_period.mjs">>"%LOG%" 2>&1
 if errorlevel 1 goto e_period
 
-call :log "[8/14] Validate snapshot (auto revert to last valid)"
+call :log "[9/15] Validate snapshot (auto revert to last valid)"
 "%PY%" "%PIPE%\guard_snapshot.py" check>>"%LOG%" 2>&1
 if errorlevel 1 goto e_guard
 
-call :log "[9/14] Build board html"
+call :log "[10/15] Build board html"
 "%PY%" "%AGG%\build_board.py">>"%LOG%" 2>&1
 if errorlevel 1 goto e_build
 
-call :log "[10/14] Build excel deliver"
+call :log "[11/15] Build excel deliver"
 "%PY%" "%AGG%\build_excel.py">>"%LOG%" 2>&1
 if errorlevel 1 call :log "WARN: excel build failed (does not affect push)"
 
-call :log "[11/14] Screenshot 3 sections"
+call :log "[12/15] Screenshot 3 sections"
 "%NODE%" "%AGG%\shot_sections.mjs">>"%LOG%" 2>&1
 if errorlevel 1 goto e_shot
 
-call :log "[12/14] Upload screenshots to GitHub"
+call :log "[13/15] Upload screenshots to GitHub"
 "%PY%" "%PIPE%\publish_shots.py">>"%LOG%" 2>&1
 if errorlevel 1 goto e_upload
 
-call :log "[13/14] Push DingTalk (main robot, fallback to backup)"
+call :log "[14/15] Push DingTalk (main robot, fallback to backup)"
 "%PY%" "%PIPE%\push_dingtalk.py">>"%LOG%" 2>&1
 if errorlevel 1 goto e_push
 
-call :log "[14/14] Mirror screenshots to local public dir"
+call :log "[15/15] Mirror screenshots to local public dir"
 copy /Y "%AGG%\shots\1_city.png" "%AGG%\shots\public\1_city.png">nul 2>&1
 copy /Y "%AGG%\shots\2_team.png" "%AGG%\shots\public\2_team.png">nul 2>&1
 copy /Y "%AGG%\shots\3_squad.png" "%AGG%\shots\public\3_squad.png">nul 2>&1
